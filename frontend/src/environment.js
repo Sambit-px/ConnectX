@@ -1,6 +1,6 @@
 let IS_PROD = true;
 const server = IS_PROD ?
-    "https://connectx-3q7l.onrender.com" :
+    "https://connectx-h6v0.onrender.com" :
 
     "http://localhost:8000"
 
