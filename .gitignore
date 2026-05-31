@@ -11,3 +11,4 @@ backend/.env
 # Common
 .DS_Store
 *.log
+node_modules/
