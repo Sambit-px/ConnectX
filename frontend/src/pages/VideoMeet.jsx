@@ -13,6 +13,7 @@ import ShareIcon from '@mui/icons-material/Share';
 import SendIcon from '@mui/icons-material/Send'
 import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import CloseFullscreenIcon from '@mui/icons-material/CloseFullscreen';
+import CloseIcon from '@mui/icons-material/Close';
 import server from '../environment';
 
 const server_url = server;
@@ -44,7 +45,6 @@ export default function VideoMeetComponent() {
     let localVideoref = useRef();
 
     const usernameRef = useRef('');
-    // ── NEW: mirror of usernames state, always fresh inside socket closures ──
     const usernamesRef = useRef({});
 
     let [videoAvailable, setVideoAvailable] = useState(true);
@@ -64,11 +64,20 @@ export default function VideoMeetComponent() {
     let [localExpanded, setLocalExpanded] = useState(false);
     let [usernames, setUsernames] = useState({});
 
+    // ── NEW: track if we're on mobile (<=768px) ──
+    const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+    // ── NEW: on mobile, chat slides over video as an overlay ──
+    // showModal still drives desktop sidebar; on mobile it's an overlay
+    useEffect(() => {
+        const handleResize = () => setIsMobile(window.innerWidth <= 768);
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
+
     // Timer
     let [callDuration, setCallDuration] = useState(0);
     let callStartRef = useRef(null);
 
-    // ── Helper: update both state and ref together ──
     const updateUsernames = (updater) => {
         setUsernames(prev => {
             const next = typeof updater === 'function'
@@ -92,7 +101,7 @@ export default function VideoMeetComponent() {
         const h = Math.floor(secs / 3600);
         const m = Math.floor((secs % 3600) / 60);
         const s = secs % 60;
-        return [h, m, s].map(v => String(v).padStart(2, '0')).join(':');
+        return [h, m, s].map(v => String(v).padStart(2, '00')).join(':');
     };
 
     useEffect(() => { getPermissions(); }, [])
@@ -243,24 +252,21 @@ export default function VideoMeetComponent() {
             socketRef.current.emit('join-call', window.location.href, currentUsername);
             socketIdRef.current = socketRef.current.id;
 
-            // Register own name immediately
             updateUsernames({ [socketRef.current.id]: currentUsername });
 
             socketRef.current.on('chat-message', addMessage);
 
-            // Fallback: individual user-name events
             socketRef.current.on('user-name', (id, name) => {
                 if (name) updateUsernames({ [id]: name });
             });
 
             socketRef.current.on('call-ended', () => {
                 try { localVideoref.current.srcObject.getTracks().forEach(t => t.stop()) } catch (e) { }
-                window.location.href = "/";
+                window.location.href = localStorage.getItem("token") ? "/home" : "/";
             });
 
             socketRef.current.on('user-left', (id) => {
                 setVideos((videos) => videos.filter((video) => video.socketId !== id));
-                // Use setUsernames directly here (delete needs special handling)
                 setUsernames(prev => {
                     const updated = { ...prev };
                     delete updated[id];
@@ -270,8 +276,6 @@ export default function VideoMeetComponent() {
             });
 
             socketRef.current.on('user-joined', (id, clients, usernameMap) => {
-
-                // ── Apply ALL names FIRST before touching peer connections ──
                 if (usernameMap && typeof usernameMap === 'object') {
                     updateUsernames(usernameMap);
                 }
@@ -287,12 +291,10 @@ export default function VideoMeetComponent() {
                         }
                     };
 
-                    // ── FIXED: ontrack replaces deprecated onaddstream ──
                     connections[socketListId].ontrack = (event) => {
                         const stream = event.streams[0];
                         if (!stream) return;
 
-                        // Re-apply name from ref at the moment the track arrives
                         const name = usernamesRef.current[socketListId];
                         if (name) updateUsernames({ [socketListId]: name });
 
@@ -319,7 +321,6 @@ export default function VideoMeetComponent() {
                         }
                     };
 
-                    // ── FIXED: addTrack replaces deprecated addStream ──
                     if (window.localStream !== undefined && window.localStream !== null) {
                         window.localStream.getTracks().forEach(track =>
                             connections[socketListId].addTrack(track, window.localStream)
@@ -375,7 +376,7 @@ export default function VideoMeetComponent() {
     let handleEndCall = () => {
         try { socketRef.current.emit('end-call'); } catch (e) { }
         try { localVideoref.current.srcObject.getTracks().forEach(t => t.stop()) } catch (e) { }
-        window.location.href = "/";
+        window.location.href = localStorage.getItem("token") ? "/home" : "/";
     }
 
     const addMessage = (data, sender, socketIdSender) => {
@@ -400,6 +401,7 @@ export default function VideoMeetComponent() {
         <div style={{
             minHeight: '100vh', background: C.bg, display: 'flex', alignItems: 'center',
             justifyContent: 'center', fontFamily: "'DM Sans', system-ui, sans-serif",
+            padding: '16px',
         }}>
             <style>{`
                 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap');
@@ -413,7 +415,8 @@ export default function VideoMeetComponent() {
 
             <div style={{
                 background: C.surface, border: `1px solid ${C.border}`,
-                borderRadius: 24, padding: '48px 40px', width: '100%', maxWidth: 440,
+                borderRadius: 24, padding: '40px 32px',
+                width: '100%', maxWidth: 440,
                 backdropFilter: 'blur(24px)', boxShadow: '0 32px 80px rgba(0,0,0,0.5)',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24,
             }}>
@@ -492,10 +495,16 @@ export default function VideoMeetComponent() {
 
     /* ── MEET ROOM ── */
     return (
+        /*
+         * FIX 1: The outer wrapper is now `position: fixed; inset: 0` so it
+         * always fills exactly the viewport — no scrolling at the page level.
+         * Previously `minHeight: 100vh` + flex children could overflow and
+         * push the control bar off-screen when the browser chrome appeared.
+         */
         <div style={{
-            minHeight: '100vh', background: C.bg, display: 'flex',
+            position: 'fixed', inset: 0,
+            background: C.bg, display: 'flex', flexDirection: 'column',
             fontFamily: "'DM Sans', system-ui, sans-serif", overflow: 'hidden',
-            position: 'relative', flexDirection: 'column',
         }}>
             <style>{`
                 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap');
@@ -512,9 +521,16 @@ export default function VideoMeetComponent() {
                 ::-webkit-scrollbar-track { background: transparent; }
                 ::-webkit-scrollbar-thumb { background: ${C.secBd}; border-radius: 4px; }
                 @keyframes timerPulse { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+                /* FIX 2: smaller control buttons on mobile so they all fit in one row */
+                @media (max-width: 480px) {
+                    .ctrl-btn { width: 40px !important; height: 40px !important; }
+                    .ctrl-btn-end { width: 44px !important; height: 44px !important; }
+                    .ctrl-bar { gap: 6px !important; padding: 0 8px !important; }
+                }
             `}</style>
 
-            {/* TOP BAR */}
+            {/* TOP BAR — unchanged, always visible */}
             <div style={{
                 height: 52, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 padding: '0 20px', background: C.surface,
@@ -557,18 +573,39 @@ export default function VideoMeetComponent() {
                 </div>
             </div>
 
-            {/* BODY */}
-            <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+            {/*
+             * BODY
+             * FIX 3: `flex: 1; minHeight: 0` so this fills the space between
+             * top bar and nothing else — it never grows past the viewport.
+             * On desktop: row layout (video | chat sidebar).
+             * On mobile: column layout (video stacked above control bar),
+             *            chat is a fixed overlay instead of a sidebar.
+             */}
+            <div style={{
+                flex: 1, display: 'flex', minHeight: 0,
+                flexDirection: 'row',   // always row; mobile chat is overlay
+            }}>
 
-                {/* VIDEO AREA */}
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                {/* ── VIDEO COLUMN ──
+                 * FIX 4: This column is ALWAYS flex: 1 regardless of chat state.
+                 * Previously when chat was open it would shrink and control bar
+                 * would be pushed below viewport on some screen sizes.
+                 * The chat panel on desktop is a sidebar that sits beside this;
+                 * on mobile it's a position:fixed overlay so it doesn't affect layout.
+                 */}
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
+
+                    {/* VIDEO GRID */}
                     <div style={{
-                        flex: 1, display: 'grid', padding: 16, gap: 12, overflow: 'auto',
-                        gridTemplateColumns: videos.length <= 1 ? '1fr' : videos.length <= 4 ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)',
+                        flex: 1, display: 'grid', padding: 12, gap: 10, overflowY: 'auto',
+                        gridTemplateColumns: videos.length <= 1
+                            ? '1fr'
+                            : 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))',
                         alignContent: 'start',
                         opacity: localExpanded ? 0.25 : 1,
                         transition: 'opacity 0.3s ease',
                         pointerEvents: localExpanded ? 'none' : 'auto',
+                        minHeight: 0,
                     }}>
                         {videos.length === 0 && (
                             <div style={{
@@ -587,7 +624,8 @@ export default function VideoMeetComponent() {
                         {videos.map((v) => (
                             <div key={v.socketId} style={{
                                 borderRadius: 16, overflow: 'hidden', position: 'relative',
-                                border: `1px solid ${C.border}`, background: 'rgba(10,14,26,0.9)', aspectRatio: '16/9',
+                                border: `1px solid ${C.border}`, background: 'rgba(10,14,26,0.9)',
+                                aspectRatio: '16/9',
                             }}>
                                 <video
                                     data-socket={v.socketId}
@@ -595,7 +633,6 @@ export default function VideoMeetComponent() {
                                     autoPlay
                                     style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                                 />
-                                {/* ── Name label: reads from state with ref as fallback ── */}
                                 <div style={{
                                     position: 'absolute', bottom: 10, left: 10,
                                     background: 'rgba(5,8,15,0.65)', backdropFilter: 'blur(8px)',
@@ -611,11 +648,20 @@ export default function VideoMeetComponent() {
                         ))}
                     </div>
 
-                    {/* CONTROL BAR */}
-                    <div style={{
-                        height: 72, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        gap: 10, background: C.surface, borderTop: `1px solid ${C.border}`,
+                    {/*
+                     * CONTROL BAR
+                     * FIX 5: flexShrink:0 prevents it from being squeezed out.
+                     * It's inside the video column so it's always visible
+                     * regardless of chat state. Height is auto on mobile so
+                     * the buttons don't get clipped.
+                     */}
+                    <div className="ctrl-bar" style={{
+                        minHeight: 68, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        gap: 10, padding: '0 12px',
+                        background: C.surface, borderTop: `1px solid ${C.border}`,
                         backdropFilter: 'blur(24px)', flexShrink: 0,
+                        flexWrap: 'wrap',   // allows wrapping on very small screens as last resort
+                        paddingTop: 10, paddingBottom: 10,
                     }}>
                         <IconButton className="ctrl-btn" onClick={handleVideo} style={{
                             background: video ? C.secDim : C.priDim,
@@ -633,7 +679,7 @@ export default function VideoMeetComponent() {
                             {audio ? <MicIcon fontSize="small" /> : <MicOffIcon fontSize="small" />}
                         </IconButton>
 
-                        <IconButton className="ctrl-btn" onClick={handleEndCall} style={{
+                        <IconButton className="ctrl-btn ctrl-btn-end" onClick={handleEndCall} style={{
                             background: C.pri, color: '#07090f', borderRadius: 14, width: 52, height: 52,
                             boxShadow: `0 4px 20px rgba(255,110,127,0.40)`,
                         }}>
@@ -689,94 +735,42 @@ export default function VideoMeetComponent() {
                     </div>
                 </div>
 
-                {/* LOCAL PIP */}
-                <div
-                    onClick={() => setLocalExpanded(e => !e)}
-                    style={{
-                        position: 'fixed',
-                        ...(localExpanded ? {
-                            top: 52, left: 0, right: showModal ? 320 : 0, bottom: 72,
-                            width: 'auto', borderRadius: 0,
-                        } : {
-                            bottom: 90, right: showModal ? 356 : 20, width: 180, borderRadius: 14,
-                        }),
-                        overflow: 'hidden', border: `1px solid ${C.secBd}`,
-                        boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-                        transition: 'all 0.3s cubic-bezier(0.16,1,0.3,1)',
-                        zIndex: localExpanded ? 15 : 20, background: 'rgba(5,8,15,0.9)', cursor: 'pointer',
-                    }}
-                >
-                    <video ref={localVideoref} autoPlay muted
-                        style={{
-                            width: '100%', height: '100%', display: 'block',
-                            aspectRatio: localExpanded ? undefined : '16/9', objectFit: 'cover'
-                        }} />
-
-                    {!audio && (
-                        <div style={{
-                            position: 'absolute', top: 7, right: 7, background: C.priDim,
-                            border: `1px solid ${C.priBd}`, borderRadius: '50%', width: 24, height: 24,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        }}>
-                            <MicOffIcon style={{ fontSize: 13, color: C.pri }} />
-                        </div>
-                    )}
-
+                {/*
+                 * CHAT PANEL — DESKTOP SIDEBAR
+                 * FIX 6: Only render as a sidebar on non-mobile screens.
+                 * On mobile this is replaced by the fixed overlay below.
+                 */}
+                {showModal && !isMobile && (
                     <div style={{
-                        position: 'absolute', top: 7, left: 7,
-                        background: 'rgba(5,8,15,0.55)', backdropFilter: 'blur(6px)',
-                        border: `1px solid ${C.secBd}`, borderRadius: '50%', width: 24, height: 24,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.7,
-                    }}>
-                        {localExpanded
-                            ? <CloseFullscreenIcon style={{ fontSize: 12, color: C.sec }} />
-                            : <OpenInFullIcon style={{ fontSize: 12, color: C.sec }} />
-                        }
-                    </div>
-
-                    <div style={{
-                        position: 'absolute', bottom: 6, left: 8,
-                        fontSize: 9, fontWeight: 700, color: C.sec,
-                        letterSpacing: '0.05em', textTransform: 'uppercase',
-                        background: 'rgba(5,8,15,0.65)', borderRadius: 100,
-                        padding: '2px 7px', backdropFilter: 'blur(6px)',
-                    }}>
-                        {usernameRef.current || username || 'You'} (You)
-                    </div>
-                </div>
-
-                {/* CHAT PANEL */}
-                {showModal && (
-                    <div style={{
-                        width: 320, display: 'flex', flexDirection: 'column',
+                        width: 300, display: 'flex', flexDirection: 'column',
                         background: C.surface, borderLeft: `1px solid ${C.border}`,
-                        backdropFilter: 'blur(24px)',
+                        backdropFilter: 'blur(24px)', flexShrink: 0,
                     }}>
                         <div style={{
-                            padding: '18px 20px', borderBottom: `1px solid ${C.border}`,
+                            padding: '16px 18px', borderBottom: `1px solid ${C.border}`,
                             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                         }}>
-                            <span style={{ fontSize: 14, fontWeight: 600, color: C.sec, letterSpacing: '-0.01em' }}>Chat</span>
+                            <span style={{ fontSize: 14, fontWeight: 600, color: C.sec }}>Chat</span>
                             <div style={{
                                 fontSize: 10, fontWeight: 600, color: C.muted,
                                 background: C.secDim, border: `1px solid ${C.secBd}`,
-                                borderRadius: 100, padding: '2px 8px', letterSpacing: '0.04em',
+                                borderRadius: 100, padding: '2px 8px',
                             }}>
                                 {messages.length} msg{messages.length !== 1 ? 's' : ''}
                             </div>
                         </div>
 
                         <div style={{
-                            flex: 1, overflowY: 'auto', padding: '16px 16px 8px',
-                            display: 'flex', flexDirection: 'column', gap: 12,
+                            flex: 1, overflowY: 'auto', padding: '14px 14px 8px',
+                            display: 'flex', flexDirection: 'column', gap: 10,
                         }}>
                             {messages.length === 0 ? (
                                 <div style={{
                                     flex: 1, display: 'flex', flexDirection: 'column',
-                                    alignItems: 'center', justifyContent: 'center', gap: 8,
+                                    alignItems: 'center', justifyContent: 'center', gap: 8, paddingTop: 40,
                                 }}>
-                                    <ChatIcon style={{ color: C.muted, fontSize: 32, opacity: 0.4 }} />
-                                    <p style={{ fontSize: 12, color: C.muted, textAlign: 'center' }}>No messages yet</p>
+                                    <ChatIcon style={{ color: C.muted, fontSize: 28, opacity: 0.4 }} />
+                                    <p style={{ fontSize: 12, color: C.muted }}>No messages yet</p>
                                 </div>
                             ) : messages.map((item, index) => {
                                 const isOwn = item.socketIdSender === socketIdRef.current;
@@ -789,7 +783,7 @@ export default function VideoMeetComponent() {
                                         <p style={{
                                             fontSize: 11, fontWeight: 700,
                                             color: isOwn ? C.sec : C.pri,
-                                            marginBottom: 4, letterSpacing: '0.02em',
+                                            marginBottom: 4,
                                         }}>
                                             {isOwn ? `${usernameRef.current || username} (You)` : item.sender}
                                         </p>
@@ -800,7 +794,7 @@ export default function VideoMeetComponent() {
                         </div>
 
                         <div style={{
-                            padding: '12px 14px', borderTop: `1px solid ${C.border}`,
+                            padding: '10px 12px', borderTop: `1px solid ${C.border}`,
                             display: 'flex', gap: 8, alignItems: 'center',
                         }}>
                             <TextField
@@ -820,6 +814,175 @@ export default function VideoMeetComponent() {
                         </div>
                     </div>
                 )}
+            </div>
+
+            {/*
+             * CHAT OVERLAY — MOBILE ONLY
+             * FIX 7: On mobile, chat slides up as a fixed overlay from the bottom.
+             * This means the video + control bar are always fully visible behind it,
+             * and the user can dismiss it with the X button or the chat toggle.
+             */}
+            {showModal && isMobile && (
+                <div style={{
+                    position: 'fixed',
+                    // sits above the control bar (68px) and below the top bar (52px)
+                    top: '30%',
+                    left: 0, right: 0, bottom: 0,
+                    background: 'rgba(5,8,15,0.97)',
+                    borderTop: `1px solid ${C.border}`,
+                    borderRadius: '20px 20px 0 0',
+                    display: 'flex', flexDirection: 'column',
+                    zIndex: 50,
+                    backdropFilter: 'blur(24px)',
+                }}>
+                    {/* Chat header with close button */}
+                    <div style={{
+                        padding: '14px 16px', borderBottom: `1px solid ${C.border}`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        flexShrink: 0,
+                    }}>
+                        <span style={{ fontSize: 14, fontWeight: 600, color: C.sec }}>Chat</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <div style={{
+                                fontSize: 10, fontWeight: 600, color: C.muted,
+                                background: C.secDim, border: `1px solid ${C.secBd}`,
+                                borderRadius: 100, padding: '2px 8px',
+                            }}>
+                                {messages.length} msg{messages.length !== 1 ? 's' : ''}
+                            </div>
+                            {/* X close button */}
+                            <IconButton
+                                onClick={() => setModal(false)}
+                                style={{
+                                    background: C.priDim, border: `1px solid ${C.priBd}`,
+                                    color: C.pri, borderRadius: 10, width: 32, height: 32,
+                                }}
+                                size="small"
+                            >
+                                <CloseIcon fontSize="small" />
+                            </IconButton>
+                        </div>
+                    </div>
+
+                    {/* Messages */}
+                    <div style={{
+                        flex: 1, overflowY: 'auto', padding: '12px 14px 8px',
+                        display: 'flex', flexDirection: 'column', gap: 10,
+                    }}>
+                        {messages.length === 0 ? (
+                            <div style={{
+                                flex: 1, display: 'flex', flexDirection: 'column',
+                                alignItems: 'center', justifyContent: 'center', gap: 8, paddingTop: 40,
+                            }}>
+                                <ChatIcon style={{ color: C.muted, fontSize: 28, opacity: 0.4 }} />
+                                <p style={{ fontSize: 12, color: C.muted }}>No messages yet</p>
+                            </div>
+                        ) : messages.map((item, index) => {
+                            const isOwn = item.socketIdSender === socketIdRef.current;
+                            return (
+                                <div key={index} style={{
+                                    background: isOwn ? C.secDim : C.priDim,
+                                    border: `1px solid ${isOwn ? C.secBd : C.priBd}`,
+                                    borderRadius: 12, padding: '10px 13px',
+                                }}>
+                                    <p style={{
+                                        fontSize: 11, fontWeight: 700,
+                                        color: isOwn ? C.sec : C.pri, marginBottom: 4,
+                                    }}>
+                                        {isOwn ? `${usernameRef.current || username} (You)` : item.sender}
+                                    </p>
+                                    <p style={{ fontSize: 13, color: C.sec, lineHeight: 1.5 }}>{item.data}</p>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {/* Input */}
+                    <div style={{
+                        padding: '10px 12px 16px', borderTop: `1px solid ${C.border}`,
+                        display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0,
+                    }}>
+                        <TextField
+                            className="chat-input" fullWidth size="small"
+                            label="Message" variant="outlined"
+                            value={message}
+                            onChange={e => setMessage(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && message.trim() && sendMessage()}
+                        />
+                        <IconButton onClick={sendMessage} disabled={!message.trim()} style={{
+                            background: message.trim() ? `linear-gradient(135deg, ${C.pri}, #ff9aaa)` : C.priDim,
+                            color: message.trim() ? '#07090f' : C.muted,
+                            borderRadius: 12, width: 40, height: 40, flexShrink: 0,
+                        }}>
+                            <SendIcon fontSize="small" />
+                        </IconButton>
+                    </div>
+                </div>
+            )}
+
+            {/* LOCAL PIP
+             * FIX 8: right offset no longer accounts for chat width on mobile,
+             * since chat is now an overlay (not sidebar) on mobile.
+             */}
+            <div
+                onClick={() => setLocalExpanded(e => !e)}
+                style={{
+                    position: 'fixed',
+                    ...(localExpanded ? {
+                        top: 52, left: 0,
+                        right: (showModal && !isMobile) ? 300 : 0,
+                        bottom: 68,
+                        width: 'auto', borderRadius: 0,
+                    } : {
+                        bottom: 80,
+                        right: (showModal && !isMobile) ? 312 : 12,
+                        width: 'min(160px, 34vw)',
+                        borderRadius: 14,
+                    }),
+                    overflow: 'hidden', border: `1px solid ${C.secBd}`,
+                    boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+                    transition: 'all 0.3s cubic-bezier(0.16,1,0.3,1)',
+                    zIndex: localExpanded ? 15 : 20,
+                    background: 'rgba(5,8,15,0.9)', cursor: 'pointer',
+                }}
+            >
+                <video ref={localVideoref} autoPlay muted
+                    style={{
+                        width: '100%', height: '100%', display: 'block',
+                        aspectRatio: localExpanded ? undefined : '16/9', objectFit: 'cover'
+                    }} />
+
+                {!audio && (
+                    <div style={{
+                        position: 'absolute', top: 7, right: 7, background: C.priDim,
+                        border: `1px solid ${C.priBd}`, borderRadius: '50%', width: 24, height: 24,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                        <MicOffIcon style={{ fontSize: 13, color: C.pri }} />
+                    </div>
+                )}
+
+                <div style={{
+                    position: 'absolute', top: 7, left: 7,
+                    background: 'rgba(5,8,15,0.55)', backdropFilter: 'blur(6px)',
+                    border: `1px solid ${C.secBd}`, borderRadius: '50%', width: 24, height: 24,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.7,
+                }}>
+                    {localExpanded
+                        ? <CloseFullscreenIcon style={{ fontSize: 12, color: C.sec }} />
+                        : <OpenInFullIcon style={{ fontSize: 12, color: C.sec }} />
+                    }
+                </div>
+
+                <div style={{
+                    position: 'absolute', bottom: 6, left: 8,
+                    fontSize: 9, fontWeight: 700, color: C.sec,
+                    letterSpacing: '0.05em', textTransform: 'uppercase',
+                    background: 'rgba(5,8,15,0.65)', borderRadius: 100,
+                    padding: '2px 7px', backdropFilter: 'blur(6px)',
+                }}>
+                    {usernameRef.current || username || 'You'} (You)
+                </div>
             </div>
         </div>
     )

@@ -59,6 +59,7 @@ export default function History() {
                     border: 1px solid rgba(191,233,255,0.10);
                     border-radius: 16px; padding: 20px 22px;
                     display: flex; align-items: center; justify-content: space-between; gap: 16px;
+                    flex-wrap: wrap;
                     transition: border-color 0.2s, background 0.2s, transform 0.2s;
                 }
                 .meeting-card:hover {
@@ -87,7 +88,7 @@ export default function History() {
             {/* NAV */}
             <nav style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '16px 44px',
+                padding: '16px clamp(16px, 4vw, 44px)',
                 background: 'rgba(5,8,15,0.70)', backdropFilter: 'blur(24px)',
                 borderBottom: '1px solid rgba(191,233,255,0.07)',
                 position: 'sticky', top: 0, zIndex: 10,
@@ -106,7 +107,7 @@ export default function History() {
             </nav>
 
             {/* CONTENT */}
-            <div style={{ maxWidth: 680, margin: '0 auto', padding: '48px 24px' }}>
+            <div style={{ maxWidth: 680, margin: '0 auto', padding: 'clamp(24px, 5vw, 48px) 16px' }}>
 
                 <div style={{ marginBottom: 36 }}>
                     <div style={{

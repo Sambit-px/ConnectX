@@ -11,6 +11,12 @@ export default function LandingPage() {
     const router = useNavigate();
     const [showJoinModal, setShowJoinModal] = React.useState(false);
     const [joinCode, setJoinCode] = React.useState('');
+    const isLoggedIn = !!localStorage.getItem('token');
+
+    const handleLogout = () => {
+        localStorage.removeItem('token');
+        router('/');
+    };
 
     const fadeUp = {
         hidden: { opacity: 0, y: 24 },
@@ -200,6 +206,11 @@ export default function LandingPage() {
                 }
                 @keyframes fadeIn { from{opacity:0} to{opacity:1} }
                 .join-modal-card {
+                    @media (max-width: 768px) {
+                        .glass-nav { padding: 12px 16px; }
+                        .glass-feature { display: none; }
+                        .join-modal-card { padding: 24px 18px 20px; }
+                    }
                     background: rgba(5,8,15,0.96);
                     border: 1px solid rgba(191,233,255,0.14);
                     border-radius: 22px;
@@ -270,12 +281,23 @@ export default function LandingPage() {
                     </div>
 
                     <div className="hidden md:flex items-center gap-2">
-                        <div className="flex items-center gap-0.5 nav-pill-group rounded-full">
-                            <button onClick={() => router('/auth')} className="btn-nav">Register</button>
-                        </div>
-                        <button onClick={() => router('/auth')} className="btn-signin">
-                            Sign In <ArrowRight size={13} strokeWidth={2.2} />
-                        </button>
+                        {isLoggedIn ? (
+                            <>
+                                <button onClick={() => router('/home')} className="btn-nav">Home</button>
+                                <button onClick={handleLogout} className="btn-signin">
+                                    Logout <ArrowRight size={13} strokeWidth={2.2} />
+                                </button>
+                            </>
+                        ) : (
+                            <>
+                                <div className="flex items-center gap-0.5 nav-pill-group rounded-full">
+                                    <button onClick={() => router('/auth')} className="btn-nav">Register</button>
+                                </div>
+                                <button onClick={() => router('/auth')} className="btn-signin">
+                                    Sign In <ArrowRight size={13} strokeWidth={2.2} />
+                                </button>
+                            </>
+                        )}
                     </div>
                 </motion.nav>
 
@@ -310,7 +332,7 @@ export default function LandingPage() {
                             <motion.div
                                 custom={3} initial="hidden" animate="visible" variants={fadeUp}
                                 className="flex flex-col sm:flex-row items-center gap-3 justify-center lg:justify-start">
-                                <Link to="/auth"
+                                <Link to={localStorage.getItem('token') ? '/home' : '/auth'}
                                     className="btn-primary-cta grad-bg w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-3.5 rounded-full text-slate-900 text-[14.5px] font-bold no-underline">
                                     Start a meeting
                                     <ArrowRight size={16} strokeWidth={2.6} />

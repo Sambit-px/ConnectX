@@ -171,9 +171,14 @@ function HomeComponent() {
                 .vbar:nth-child(1){height:5px} .vbar:nth-child(2){height:9px} .vbar:nth-child(3){height:13px} .vbar:nth-child(4){height:16px}
 
                 @media(max-width:780px){
-                    .hm{flex-direction:column;padding:36px 24px;gap:40px;min-height:unset;padding-bottom:60px}
-                    .hn{padding:14px 24px}
+                    .hm{flex-direction:column;padding:36px 16px;gap:32px;min-height:unset;padding-bottom:60px}
+                    .hn{padding:12px 16px}
                     .hr{width:100%}
+                    .hl{max-width:100%}
+                    .hstats{flex-wrap:wrap;gap:8px}
+                    .hstat{padding:10px 16px 10px 0;margin-right:16px}
+                    .headline{font-size:clamp(1.6rem,6vw,2.9rem)}
+                    .action-cards{gap:10px}
                 }
             `}</style>
 
@@ -201,7 +206,7 @@ function HomeComponent() {
                         </button>
                         <button className="btn-lout" onClick={() => {
                             localStorage.removeItem('token')
-                            navigate('/auth')
+                            navigate('/')
                         }}>
                             Logout <ArrowRight size={13} strokeWidth={2.5} />
                         </button>
@@ -325,4 +330,4 @@ function HomeComponent() {
     )
 }
 
-export default withAuth(HomeComponent) 
+export default withAuth(HomeComponent)

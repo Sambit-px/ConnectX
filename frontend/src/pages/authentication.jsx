@@ -2,13 +2,11 @@ import * as React from 'react';
 import * as ReactDOM from 'react-dom/client';
 import { AuthContext } from '../contexts/AuthContext';
 import { Snackbar } from '@mui/material';
+import { useLocation, useNavigate } from "react-router-dom";
 import { Video, ArrowRight, Eye, EyeOff, User, Lock, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Hyperspeed from '../components/Hyperspeed';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Stable options at module level — reference never changes.
-// ─────────────────────────────────────────────────────────────────────────────
 const HYPERSPEED_OPTS = {
     distortion: 'turbulentDistortion',
     length: 400,
@@ -45,76 +43,46 @@ const HYPERSPEED_OPTS = {
     },
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// HyperspeedPortal
-//
-// WHY this approach:
-//   React 18 StrictMode (development) deliberately mounts → unmounts →
-//   remounts every component to surface side-effect bugs. This causes
-//   Hyperspeed's useEffect cleanup to call dispose() (setting the GL
-//   renderer to null), then init() runs again on that null renderer →
-//   EffectComposer.addPass() crashes.
-//
-//   React.memo only skips re-renders due to prop changes — it cannot
-//   prevent StrictMode's intentional double-mount.
-//
-//   The fix: call ReactDOM.createRoot() on a plain div that we own,
-//   producing a SEPARATE React tree that is completely outside the app's
-//   StrictMode boundary. Hyperspeed is rendered inside that tree and
-//   therefore never double-mounted. The hyperRootRef guard ensures we
-//   create the root only once even if the outer effect runs twice.
-// ─────────────────────────────────────────────────────────────────────────────
 function HyperspeedPortal() {
     const containerRef = React.useRef(null);
     const hyperRootRef = React.useRef(null);
 
     React.useEffect(() => {
         const container = containerRef.current;
-
-        // Guard: if root already created (StrictMode's second mount) skip.
         if (!container || hyperRootRef.current) return;
-
-        // Create an isolated React root — NOT under the app's StrictMode tree.
         hyperRootRef.current = ReactDOM.createRoot(container);
         hyperRootRef.current.render(
             <Hyperspeed effectOptions={HYPERSPEED_OPTS} />
         );
-
-        // No cleanup returned intentionally:
-        // Returning a cleanup would let StrictMode unmount Hyperspeed via
-        // root.unmount(), which disposes the GL context → same crash.
-        // Skipping cleanup means the isolated root (and GL context) persists
-        // through StrictMode's artificial unmount/remount cycle.
+        // No cleanup — intentional, see comment in original file
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     return (
         <div
             ref={containerRef}
-            style={{
-                position: 'absolute',
-                inset: 0,
-                width: '100%',
-                height: '100%',
-            }}
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
         />
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Main component
-// ─────────────────────────────────────────────────────────────────────────────
 export default function Authentication() {
+    const location = useLocation();
+    const navigate = useNavigate();
+    const from = location.state?.from || "/home";
     const [username, setUsername] = React.useState('');
     const [password, setPassword] = React.useState('');
     const [name, setName] = React.useState('');
     const [error, setError] = React.useState('');
     const [message, setMessage] = React.useState('');
-    const [formState, setFormState] = React.useState(0); // 0 = login, 1 = register
+    const [formState, setFormState] = React.useState(0);
     const [open, setOpen] = React.useState(false);
     const [showPass, setShowPass] = React.useState(false);
     const [loading, setLoading] = React.useState(false);
 
     const { handleRegister, handleLogin } = React.useContext(AuthContext);
+
+    const PASSWORD_RULE = /^(?=.*[A-Za-z])(?=.*\d).{8,}$/;
+    const isPasswordValid = (pwd) => PASSWORD_RULE.test(pwd);
 
     const switchTab = (tab) => {
         setFormState(tab);
@@ -130,15 +98,20 @@ export default function Authentication() {
         try {
             if (formState === 0) {
                 await handleLogin(username, password);
+                navigate(from);
             } else {
+                if (!isPasswordValid(password)) {
+                    setError('Password must be at least 8 characters and include at least 1 letter and 1 number.');
+                    setLoading(false);
+                    return;
+                }
                 const result = await handleRegister(name, username, password);
                 setMessage(result);
                 setOpen(true);
                 switchTab(0);
             }
         } catch (err) {
-            const msg = err?.response?.data?.message || 'Something went wrong.';
-            setError(msg);
+            setError(err?.response?.data?.message || 'Something went wrong.');
         } finally {
             setLoading(false);
         }
@@ -163,21 +136,28 @@ export default function Authentication() {
 
                 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+                /*
+                 * FIX 1: auth-shell uses overflow-y: auto instead of hidden.
+                 * On very small phones (iPhone SE, 375px) with the register form
+                 * open (3 fields), the card is taller than the viewport.
+                 * hidden clipped the submit button — auto lets it scroll.
+                 * align-items: flex-start + padding ensures card isn't cut at top.
+                 */
                 .auth-shell {
                     position: fixed;
                     inset: 0;
                     display: flex;
                     align-items: center;
                     justify-content: center;
-                    overflow: hidden;
+                    overflow-y: auto;
                     background: #000;
                     font-family: 'DM Sans', system-ui, sans-serif;
                     isolation: isolate;
+                    padding: 20px 0;
                 }
 
-                /* Hyperspeed host — plain wrapper, content rendered by isolated root */
                 .auth-hyper {
-                    position: absolute;
+                    position: fixed;
                     inset: 0;
                     z-index: 0;
                     width: 100%;
@@ -192,7 +172,7 @@ export default function Authentication() {
                 }
 
                 .auth-vignette {
-                    position: absolute;
+                    position: fixed;
                     inset: 0;
                     z-index: 1;
                     pointer-events: none;
@@ -204,12 +184,17 @@ export default function Authentication() {
                     );
                 }
 
+                /*
+                 * FIX 2: Remove the duplicate width declaration (was set twice),
+                 * use margin: 0 auto so card stays centered on all screen sizes,
+                 * and tighten padding on mobile via the media query below.
+                 */
                 .auth-card {
                     position: relative;
                     z-index: 2;
-                    width: 100%;
+                    width: calc(100% - 32px);
                     max-width: 416px;
-                    margin: 0 16px;
+                    margin: 0 auto;
                     background: rgba(5, 8, 15, 0.22);
                     backdrop-filter: blur(20px) saturate(1.9) brightness(1.05);
                     -webkit-backdrop-filter: blur(20px) saturate(1.9) brightness(1.05);
@@ -381,11 +366,34 @@ export default function Authentication() {
                     display: flex; align-items: center; justify-content: center;
                     flex-shrink: 0;
                 }
+
+                /*
+                 * FIX 3: Mobile padding — tighten horizontal padding so the card
+                 * content doesn't feel cramped on 375px screens.
+                 * Also reduce heading size slightly so it never wraps awkwardly.
+                 */
+                @media (max-width: 480px) {
+                    .auth-card {
+                        padding: 28px 22px 24px;
+                        border-radius: 20px;
+                        width: calc(100% - 24px);
+                    }
+                }
+
+                /*
+                 * FIX 4: On very short screens (landscape phone) allow the shell
+                 * to scroll from the top instead of centering (which cuts the top).
+                 */
+                @media (max-height: 700px) {
+                    .auth-shell {
+                        align-items: flex-start;
+                        padding: 16px 0 24px;
+                    }
+                }
             `}</style>
 
             <div className="auth-shell">
 
-                {/* Hyperspeed lives in its own isolated React root — immune to StrictMode */}
                 <div className="auth-hyper">
                     <HyperspeedPortal />
                 </div>
@@ -529,6 +537,25 @@ export default function Authentication() {
                                     : <Eye size={14} strokeWidth={1.9} />}
                             </button>
                         </div>
+
+                        {formState === 1 && (
+                            <div
+                                style={{
+                                    fontSize: '12px',
+                                    marginTop: '-6px',
+                                    marginBottom: '4px',
+                                    color: password.length === 0
+                                        ? 'rgba(191,233,255,0.45)'
+                                        : (isPasswordValid(password) ? '#4ade80' : '#ff6e7f')
+                                }}
+                            >
+                                {password.length === 0
+                                    ? 'Min 8 characters, with at least 1 letter and 1 number'
+                                    : (isPasswordValid(password)
+                                        ? 'Password looks good'
+                                        : 'Needs 8+ characters, 1 letter and 1 number')}
+                            </div>
+                        )}
 
                         <AnimatePresence>
                             {error && (

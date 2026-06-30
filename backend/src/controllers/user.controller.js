@@ -5,6 +5,9 @@ import bcrypt, { hash } from "bcrypt"
 import crypto from "crypto"
 import { Meeting } from "../models/meeting.model.js";
 import { getConnections } from "./socketManager.js";
+
+const PASSWORD_RULE = /^(?=.*[A-Za-z])(?=.*\d).{8,}$/;
+
 const login = async (req, res) => {
 
     const { username, password } = req.body;
@@ -46,6 +49,10 @@ const register = async (req, res) => {
         const existingUser = await User.findOne({ username });
         if (existingUser) {
             return res.status(httpStatus.FOUND).json({ message: "User already exists" });
+        }
+
+        if (!PASSWORD_RULE.test(password)) {
+            return res.status(httpStatus.BAD_REQUEST).json({ message: "Password must be at least 8 characters and include at least 1 letter and 1 number." });
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
