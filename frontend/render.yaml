@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: connectx-backend
+    runtime: node
+    rootDir: backend
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: MONGO_DB
+        sync: false
